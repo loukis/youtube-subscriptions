@@ -90,6 +90,11 @@ export default function Dashboard() {
     try {
       const res = await fetch("/api/sync", { method: "POST" });
       const data = await res.json();
+      if (data.error === "TokenExpired") {
+        // Token ανανέωση απέτυχε — χρειάζεται νέο login
+        window.location.href = "/api/auth/signin";
+        return;
+      }
       if (!res.ok) throw new Error(data.error);
       const subData = await fetch("/api/subscriptions").then((r) => r.json());
       setCache(subData);

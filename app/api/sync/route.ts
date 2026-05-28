@@ -7,8 +7,14 @@ export const maxDuration = 300; // 5 λεπτά timeout για το sync
 
 export async function POST() {
   const session = await auth();
+
   if (!session?.accessToken) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Αν το token refresh απέτυχε, ζητάμε νέο login
+  if (session.error === "RefreshTokenError") {
+    return NextResponse.json({ error: "TokenExpired" }, { status: 401 });
   }
 
   try {
