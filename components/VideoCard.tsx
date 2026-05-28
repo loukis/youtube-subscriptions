@@ -31,10 +31,20 @@ function formatDuration(iso: string) {
 interface Props {
   video: Video;
   watched: boolean;
+  savedForLater: boolean;
+  isNew: boolean;
   onToggleWatched: (id: string) => void;
+  onToggleWatchLater: (id: string) => void;
 }
 
-export default function VideoCard({ video, watched, onToggleWatched }: Props) {
+export default function VideoCard({
+  video,
+  watched,
+  savedForLater,
+  isNew,
+  onToggleWatched,
+  onToggleWatchLater,
+}: Props) {
   return (
     <div className={`flex flex-col bg-white rounded-xl overflow-hidden shadow-sm border transition-all duration-200 ${
       watched ? "border-gray-100 opacity-50" : "border-gray-100 hover:shadow-md hover:border-gray-200"
@@ -62,6 +72,15 @@ export default function VideoCard({ video, watched, onToggleWatched }: Props) {
             </div>
           )}
           <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors duration-200" />
+
+          {/* Badges */}
+          <div className="absolute top-2 left-2 flex gap-1">
+            {isNew && !watched && (
+              <span className="bg-red-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                NEW
+              </span>
+            )}
+          </div>
           {watched && (
             <div className="absolute top-2 right-2 bg-green-500 text-white text-xs font-medium px-2 py-0.5 rounded-full">
               Watched
@@ -91,11 +110,11 @@ export default function VideoCard({ video, watched, onToggleWatched }: Props) {
         </div>
       </a>
 
-      {/* Watched toggle button */}
-      <div className="px-3 pb-3">
+      {/* Action buttons */}
+      <div className="px-3 pb-3 flex gap-2">
         <button
           onClick={() => onToggleWatched(video.id)}
-          className={`w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+          className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
             watched
               ? "bg-green-50 text-green-700 hover:bg-red-50 hover:text-red-600"
               : "bg-gray-50 text-gray-500 hover:bg-green-50 hover:text-green-700"
@@ -106,7 +125,7 @@ export default function VideoCard({ video, watched, onToggleWatched }: Props) {
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
-              Watched — undo
+              Watched
             </>
           ) : (
             <>
@@ -114,9 +133,24 @@ export default function VideoCard({ video, watched, onToggleWatched }: Props) {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
               </svg>
-              Mark as watched
+              Mark watched
             </>
           )}
+        </button>
+
+        <button
+          onClick={() => onToggleWatchLater(video.id)}
+          title={savedForLater ? "Αφαίρεση από Watch Later" : "Αποθήκευση για αργότερα"}
+          className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+            savedForLater
+              ? "bg-blue-50 text-blue-600 hover:bg-red-50 hover:text-red-500"
+              : "bg-gray-50 text-gray-400 hover:bg-blue-50 hover:text-blue-600"
+          }`}
+        >
+          <svg className="w-3.5 h-3.5" fill={savedForLater ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+          </svg>
         </button>
       </div>
     </div>
