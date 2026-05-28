@@ -259,6 +259,9 @@ export default function Dashboard() {
   return (
     <div className="space-y-4">
 
+      {/* Sticky controls block */}
+      <div className="sticky top-[52px] z-10 bg-gray-50 pt-2 pb-3 -mt-2 space-y-3">
+
       {/* Top bar: search + controls */}
       <div className="flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 min-w-[200px]">
@@ -367,6 +370,8 @@ export default function Dashboard() {
         />
       )}
 
+      </div> {/* end sticky */}
+
       {/* Stats bar */}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-3 text-sm text-gray-500">
@@ -409,7 +414,7 @@ export default function Dashboard() {
       </div>
 
       {/* Search label */}
-      {q && (
+      {q && viewMode === "feed" && (
         <p className="text-sm text-gray-500">
           Αποτελέσματα για <span className="font-semibold text-gray-800">"{searchQuery}"</span>
           {" "}— {visibleChannels.length} κανάλια
