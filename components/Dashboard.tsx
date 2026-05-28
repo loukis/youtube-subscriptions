@@ -12,6 +12,7 @@ interface CacheData {
   channels: Channel[];
   videos: Video[];
   syncedAt: string | null;
+  stale?: boolean;
 }
 
 export default function Dashboard() {
@@ -37,6 +38,18 @@ export default function Dashboard() {
         setCache(subData);
         setAssignments(catData);
         setWatched(watchedData);
+
+        // Auto-sync αν ο cache είναι παλιότερος από 24 ώρες
+        if (subData.stale) {
+          setSyncing(true);
+          fetch("/api/sync", { method: "POST" })
+            .then((r) => r.json())
+            .then(async () => {
+              const fresh = await fetch("/api/subscriptions").then((r) => r.json());
+              setCache(fresh);
+            })
+            .finally(() => setSyncing(false));
+        }
       })
       .catch(() => setError("Αδυναμία φόρτωσης. Δοκίμασε ξανά."))
       .finally(() => setLoading(false));
@@ -194,12 +207,13 @@ export default function Dashboard() {
             onClick={handleSync}
             disabled={syncing}
             className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 disabled:opacity-50 transition-colors"
+            title={cache.stale ? "Auto-sync σε εξέλιξη (cache > 24h)" : "Manual sync"}
           >
             <svg className={`w-4 h-4 ${syncing ? "animate-spin" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                 d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
-            {syncing ? "Syncing..." : "Sync"}
+            {syncing ? "Auto-syncing..." : "Sync"}
           </button>
         </div>
       </div>
