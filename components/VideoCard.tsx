@@ -18,6 +18,16 @@ function formatViews(count: string) {
   return `${n} views`;
 }
 
+function formatDuration(iso: string) {
+  const match = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+  if (!match) return "";
+  const h = parseInt(match[1] ?? "0");
+  const m = parseInt(match[2] ?? "0");
+  const s = parseInt(match[3] ?? "0");
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
 interface Props {
   video: Video;
   watched: boolean;
@@ -71,6 +81,12 @@ export default function VideoCard({ video, watched, onToggleWatched }: Props) {
             <span>{formatDate(video.publishedAt)}</span>
             <span>·</span>
             <span>{formatViews(video.viewCount)}</span>
+            {video.duration && (
+              <>
+                <span>·</span>
+                <span>{formatDuration(video.duration)}</span>
+              </>
+            )}
           </div>
         </div>
       </a>

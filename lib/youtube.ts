@@ -158,23 +158,41 @@ export async function getVideoDetails(
   return videos;
 }
 
+// Τρέχει async tasks σε batches για να αποφύγουμε rate limiting
+async function runInBatches<T>(
+  items: T[],
+  batchSize: number,
+  fn: (item: T) => Promise<void>
+): Promise<void> {
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    await Promise.all(batch.map(fn));
+  }
+}
+
 // Κεντρική συνάρτηση: φέρνει ΟΛΑ τα videos από ΟΛΕΣ τις subscriptions
 export async function getAllSubscriptionVideos(
   accessToken: string
 ): Promise<{ channels: Channel[]; videos: Video[] }> {
   const rawChannels = await getSubscriptions(accessToken);
+  console.log(`[sync] ${rawChannels.length} subscriptions found`);
+
   const channels = await enrichChannelsWithPlaylistIds(accessToken, rawChannels);
+  console.log(`[sync] enriched ${channels.length} channels`);
 
   const allVideoIds: string[] = [];
+  let done = 0;
 
-  await Promise.all(
-    channels.map(async (channel) => {
-      if (!channel.uploadsPlaylistId) return;
-      const ids = await getAllVideoIds(accessToken, channel.uploadsPlaylistId);
-      allVideoIds.push(...ids);
-    })
-  );
+  // 10 κανάλια τη φορά για να αποφύγουμε rate limiting
+  await runInBatches(channels, 10, async (channel) => {
+    if (!channel.uploadsPlaylistId) return;
+    const ids = await getAllVideoIds(accessToken, channel.uploadsPlaylistId);
+    allVideoIds.push(...ids);
+    done++;
+    if (done % 10 === 0) console.log(`[sync] ${done}/${channels.length} channels processed`);
+  });
 
+  console.log(`[sync] ${allVideoIds.length} video IDs collected — fetching details...`);
   const videos = await getVideoDetails(accessToken, allVideoIds);
 
   videos.sort(
