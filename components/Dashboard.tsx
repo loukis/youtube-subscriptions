@@ -21,6 +21,7 @@ export default function Dashboard() {
   const [watched, setWatched] = useState<Record<string, true>>({});
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
   const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
   const [showWatched, setShowWatched] = useState(false);
   const [showManager, setShowManager] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -39,7 +40,6 @@ export default function Dashboard() {
         setAssignments(catData);
         setWatched(watchedData);
 
-        // Auto-sync αν ο cache είναι παλιότερος από 24 ώρες
         if (subData.stale) {
           setSyncing(true);
           fetch("/api/sync", { method: "POST" })
@@ -61,7 +61,6 @@ export default function Dashboard() {
       const res = await fetch("/api/sync", { method: "POST" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      // Reload data from cache
       const subData = await fetch("/api/subscriptions").then((r) => r.json());
       setCache(subData);
     } catch {
@@ -80,11 +79,8 @@ export default function Dashboard() {
     const data = await res.json();
     setWatched((prev) => {
       const next = { ...prev };
-      if (data.watched) {
-        next[videoId] = true;
-      } else {
-        delete next[videoId];
-      }
+      if (data.watched) next[videoId] = true;
+      else delete next[videoId];
       return next;
     });
   }
@@ -99,24 +95,41 @@ export default function Dashboard() {
   }
 
   const { channels, videos, syncedAt } = cache;
+  const q = searchQuery.toLowerCase().trim();
 
-  const categoryChannels = selectedCategory
-    ? channels.filter((ch) => assignments[ch.id] === selectedCategory)
-    : channels;
+  // Κανάλια που ταιριάζουν με το search
+  const searchedChannelIds = q
+    ? new Set(channels.filter((ch) => ch.title.toLowerCase().includes(q)).map((ch) => ch.id))
+    : null;
 
+  // Κανάλια για το channel filter (category + search)
+  const visibleChannels = channels.filter((ch) => {
+    const inCategory = selectedCategory ? assignments[ch.id] === selectedCategory : true;
+    const inSearch = searchedChannelIds ? searchedChannelIds.has(ch.id) : true;
+    return inCategory && inSearch;
+  });
+
+  // Videos φιλτραρισμένα
   const filtered = videos.filter((v) => {
     const inCategory = selectedCategory ? assignments[v.channelId] === selectedCategory : true;
     const inChannel = selectedChannel ? v.channelId === selectedChannel : true;
+    const inSearch = searchedChannelIds ? searchedChannelIds.has(v.channelId) : true;
     const inWatched = showWatched ? true : !watched[v.id];
-    return inCategory && inChannel && inWatched;
+    return inCategory && inChannel && inSearch && inWatched;
   });
 
   const watchedCount = videos.filter((v) => watched[v.id]).length;
   const unwatchedCount = videos.length - watchedCount;
 
-  const counts: Record<string, number> = { all: videos.filter((v) => showWatched || !watched[v.id]).length };
+  const counts: Record<string, number> = {
+    all: videos.filter((v) => {
+      const inSearch = searchedChannelIds ? searchedChannelIds.has(v.channelId) : true;
+      return inSearch && (showWatched || !watched[v.id]);
+    }).length,
+  };
   for (const v of videos) {
     if (!showWatched && watched[v.id]) continue;
+    if (searchedChannelIds && !searchedChannelIds.has(v.channelId)) continue;
     const cat = assignments[v.channelId];
     if (cat) counts[cat] = (counts[cat] ?? 0) + 1;
   }
@@ -138,7 +151,6 @@ export default function Dashboard() {
     );
   }
 
-  // Δεν υπάρχει cache ακόμα — εμφάνισε το sync CTA
   if (videos.length === 0 && !syncedAt) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 text-center">
@@ -163,7 +175,7 @@ export default function Dashboard() {
           {syncing ? (
             <>
               <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              Syncing... (μπορεί να πάρει λίγα λεπτά)
+              Syncing...
             </>
           ) : (
             <>
@@ -181,16 +193,36 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-4">
-      {/* Category tabs + controls */}
-      <div className="flex items-end justify-between gap-4">
-        <div className="flex-1 overflow-hidden">
-          <CategoryTabs
-            selected={selectedCategory}
-            onSelect={(cat) => { setSelectedCategory(cat); setSelectedChannel(null); }}
-            counts={counts}
+      {/* Top bar: search + controls */}
+      <div className="flex items-center gap-3 flex-wrap">
+        {/* Search input */}
+        <div className="relative flex-1 min-w-[200px]">
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none"
+            fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z" />
+          </svg>
+          <input
+            type="text"
+            placeholder="Αναζήτηση καναλιού..."
+            value={searchQuery}
+            onChange={(e) => { setSearchQuery(e.target.value); setSelectedChannel(null); }}
+            className="w-full pl-9 pr-8 py-2 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
           />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
         </div>
-        <div className="shrink-0 mb-1 flex items-center gap-2">
+
+        {/* Controls */}
+        <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={() => setShowManager(true)}
             className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition-colors"
@@ -207,21 +239,38 @@ export default function Dashboard() {
             onClick={handleSync}
             disabled={syncing}
             className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 disabled:opacity-50 transition-colors"
-            title={cache.stale ? "Auto-sync σε εξέλιξη (cache > 24h)" : "Manual sync"}
+            title={cache.stale ? "Auto-sync (cache > 24h)" : "Manual sync"}
           >
             <svg className={`w-4 h-4 ${syncing ? "animate-spin" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                 d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
-            {syncing ? "Auto-syncing..." : "Sync"}
+            {syncing ? "Syncing..." : "Sync"}
           </button>
         </div>
       </div>
 
-      {/* Channel filter */}
-      {categoryChannels.length > 0 && (
+      {/* Category tabs (κρύβονται κατά τη διάρκεια search) */}
+      {!q && (
+        <CategoryTabs
+          selected={selectedCategory}
+          onSelect={(cat) => { setSelectedCategory(cat); setSelectedChannel(null); }}
+          counts={counts}
+        />
+      )}
+
+      {/* Search results label */}
+      {q && (
+        <p className="text-sm text-gray-500">
+          Αποτελέσματα για <span className="font-semibold text-gray-800">"{searchQuery}"</span>
+          {" "}— {visibleChannels.length} κανάλια, {filtered.length} videos
+        </p>
+      )}
+
+      {/* Channel filter pills */}
+      {visibleChannels.length > 0 && (
         <ChannelFilter
-          channels={categoryChannels}
+          channels={visibleChannels}
           selected={selectedChannel}
           onSelect={setSelectedChannel}
         />
@@ -231,7 +280,7 @@ export default function Dashboard() {
       <div className="flex items-center justify-between flex-wrap gap-2">
         <p className="text-sm text-gray-500">
           <span className="font-semibold text-gray-900">{filtered.length}</span> videos
-          {syncedAt && (
+          {syncedAt && !q && (
             <span className="ml-2 text-xs text-gray-400">
               · synced {new Date(syncedAt).toLocaleDateString("el-GR")}
             </span>
@@ -261,11 +310,13 @@ export default function Dashboard() {
       {filtered.length === 0 ? (
         <div className="text-center py-16 space-y-2">
           <p className="text-gray-400">
-            {unwatchedCount === 0 && !showWatched
+            {q
+              ? `Δεν βρέθηκαν κανάλια για "${searchQuery}".`
+              : unwatchedCount === 0 && !showWatched
               ? "Τα έχεις δει όλα!"
               : "Δεν βρέθηκαν videos."}
           </p>
-          {unwatchedCount === 0 && !showWatched && (
+          {unwatchedCount === 0 && !showWatched && !q && (
             <button
               onClick={() => setShowWatched(true)}
               className="text-sm text-red-600 underline underline-offset-2"
