@@ -380,6 +380,207 @@ State που διαχειρίζεται:
 
 ---
 
+## Βήμα 11 — Auto-sync (24h stale detection)
+
+**Τι:** Αυτόματο sync όταν ο cache είναι παλιότερος από 24 ώρες.
+
+**Γιατί:** Αν κάνεις unsubscribe από ένα κανάλι στο YouTube, ο local cache δεν το ξέρει μέχρι το επόμενο sync. Με auto-sync, κάθε μέρα τα δεδομένα ανανεώνονται αυτόματα.
+
+**Πώς λειτουργεί:**
+1. `GET /api/subscriptions` επιστρέφει `{ ...cache, stale: boolean }`
+2. `stale = true` αν `Date.now() - syncedAt > 24 * 60 * 60 * 1000`
+3. Το Dashboard ελέγχει `subData.stale` και αν `true`, τρέχει `POST /api/sync` στο background
+4. Ο χρήστης βλέπει τα παλιά δεδομένα αμέσως, το Sync button δείχνει "Syncing..." ενώ τρέχει
+
+```typescript
+// app/api/subscriptions/route.ts
+const STALE_AFTER_HOURS = 24;
+const age = Date.now() - new Date(cache.syncedAt).getTime();
+const stale = age > STALE_AFTER_HOURS * 60 * 60 * 1000;
+return NextResponse.json({ ...cache, stale });
+```
+
+**Σημείωση:** Το threshold αλλάζει εύκολα — απλώς άλλαξε την `STALE_AFTER_HOURS` constant.
+
+---
+
+## Βήμα 12 — Channel Search + Category Manager improvements
+
+### Channel Search (Dashboard)
+
+**Τι:** Search input που φιλτράρει κανάλια real-time.
+
+**Πώς λειτουργεί:**
+- `searchQuery` state → lowercase trim → `searchedChannelIds: Set<string>`
+- Φιλτράρει τα channel pills ΚΑΙ τα videos ταυτόχρονα
+- Κατά τη διάρκεια search τα category tabs κρύβονται (απλοποιεί το UI)
+- Εμφανίζει "X κανάλια, Y videos" για το query
+
+```typescript
+const searchedChannelIds = q
+  ? new Set(channels.filter((ch) => ch.title.toLowerCase().includes(q)).map((ch) => ch.id))
+  : null;
+
+// null = no search active = δεν φιλτράρει
+const inSearch = searchedChannelIds ? searchedChannelIds.has(v.channelId) : true;
+```
+
+### Category Manager — Search + Unassigned filter
+
+**Νέα features στο modal:**
+- **Search input** — φιλτράρει κανάλια real-time μέσα στο modal
+- **"Χωρίς κατηγορία (N)"** pill — δείχνει μόνο τα unassigned κανάλια
+- **Sorting** — unassigned κανάλια εμφανίζονται πρώτα (πορτοκαλί dropdown)
+- **Footer counter** — "X από Y κανάλια"
+
+```typescript
+// Unassigned κανάλια πρώτα, μετά αλφαβητικά
+.sort((a, b) => {
+  const aAssigned = !!local[a.id];
+  const bAssigned = !!local[b.id];
+  if (aAssigned !== bAssigned) return aAssigned ? 1 : -1;
+  return a.title.localeCompare(b.title);
+})
+```
+
+---
+
+## Βήμα 13 — Sort, Date Filter & Total Unwatched Time
+
+### Sort
+
+**3 επιλογές** (segmented control):
+- `Νεότερα` — publishedAt DESC (default)
+- `Παλιότερα` — publishedAt ASC
+- `Views` — viewCount DESC
+
+### Date Range Filter
+
+**4 επιλογές:**
+- `Όλα` — κανένα φίλτρο
+- `7d` — τελευταίες 7 μέρες
+- `30d` — τελευταίες 30 μέρες
+- `90d` — τελευταίες 90 μέρες
+
+```typescript
+const dateThreshold = useMemo(() => {
+  if (dateRange === "all") return null;
+  const days = dateRange === "7d" ? 7 : dateRange === "30d" ? 30 : 90;
+  return new Date(Date.now() - days * 86400_000).toISOString();
+}, [dateRange]);
+```
+
+### Total Unwatched Time
+
+Αθροίζει τη διάρκεια όλων των unwatched videos:
+
+```typescript
+function parseDurationSeconds(iso: string): number {
+  const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+  return parseInt(m[1]??'0')*3600 + parseInt(m[2]??'0')*60 + parseInt(m[3]??'0');
+}
+
+const unwatchedSeconds = useMemo(() =>
+  videos.filter((v) => !watched[v.id])
+        .reduce((sum, v) => sum + parseDurationSeconds(v.duration), 0),
+  [videos, watched]
+);
+// → "19ω 45λ unwatched"
+```
+
+---
+
+## Βήμα 14 — "New Since Last Visit" Badge
+
+**Τι:** Κόκκινο "NEW" badge σε videos που ανέβηκαν από την τελευταία επίσκεψη.
+
+**Αρχεία:**
+- `lib/lastvisit.ts` + `data/lastvisit.json` — αποθηκεύει timestamp τελευταίας επίσκεψης
+- `app/api/lastvisit/route.ts` — GET (διάβασε) / POST (ενημέρωσε)
+
+**Flow:**
+1. Dashboard φορτώνει → `GET /api/lastvisit` → παίρνει `lastVisitAt` (προηγούμενης επίσκεψης)
+2. Αμέσως μετά → `POST /api/lastvisit` → αποθηκεύει `now` ως νέο lastVisitAt
+3. Κάθε video ελέγχεται: `isNew = video.publishedAt > lastVisitAt`
+4. Επόμενη επίσκεψη: τα τωρινά "new" δεν είναι πια new
+
+```typescript
+// VideoCard
+{isNew && !watched && (
+  <span className="bg-red-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+    NEW
+  </span>
+)}
+```
+
+**Γιατί ενημερώνουμε αμέσως και όχι αργότερα:**
+Αν περιμέναμε να φύγει ο χρήστης, δεν θα γνωρίζαμε πότε "είδε" τα new videos. Η απλούστερη προσέγγιση: κάθε επίσκεψη = νέο baseline.
+
+---
+
+## Βήμα 15 — Watch Later
+
+**Τι:** Ξεχωριστή λίστα "αποθήκευσε για αργότερα" — διαφορετικό από το watched.
+
+| Feature | Watched | Watch Later |
+|---------|---------|-------------|
+| Σκοπός | "Το είδα" | "Θέλω να το δω" |
+| Default view | Κρύβεται | Εμφανίζεται |
+| View mode | Feed | "Watch Later" tab |
+
+**Αρχεία:**
+- `lib/watchlater.ts` + `data/watchlater.json`
+- `app/api/watchlater/route.ts` — GET / POST toggle
+
+**UI:**
+- Bookmark icon σε κάθε VideoCard (γεμάτο = saved, άδειο = unsaved)
+- "Watch Later (N)" toggle button πάνω στο dashboard
+- Όταν είναι ενεργό: εμφανίζονται μόνο τα saved videos, κρύβονται category tabs/filters
+
+---
+
+## Βήμα 16 — Sticky Controls Bar
+
+**Τι:** Το search bar, tabs, sort/filter και channel pills μένουν ορατά κατά το scroll.
+
+**Γιατί `top-[52px]` και όχι `top-0`:**
+Ο header (`sticky top-0`) έχει ύψος 52px (`py-3` = 24px padding + 28px content). Το sticky controls block πρέπει να αρχίζει εκεί που τελειώνει ο header.
+
+```tsx
+<div className="sticky top-[52px] z-10 bg-gray-50 pt-2 pb-3 space-y-3">
+  {/* search, tabs, sort, channel pills */}
+</div>
+```
+
+**Σημείωση:** Αν αλλάξει το ύψος του header, πρέπει να ενημερωθεί και το `top-[52px]`.
+
+---
+
+## Βήμα 17 — Pagination (Performance Fix)
+
+**Πρόβλημα:** Με 51.000+ videos, το browser render-άριζε εκατοντάδες χιλιάδες DOM elements ταυτόχρονα → freeze.
+
+**Λύση:** Render-άρισε μόνο τα πρώτα 48 videos. "Φόρτωσε περισσότερα" για άλλα 48.
+
+```typescript
+const [visibleCount, setVisibleCount] = useState(48);
+
+// Reset σε κάθε filter change
+useEffect(() => {
+  setVisibleCount(48);
+}, [q, selectedCategory, selectedChannel, sortBy, dateRange, showWatched, viewMode]);
+
+// Render μόνο τα πρώτα N
+filtered.slice(0, visibleCount).map(...)
+```
+
+**Γιατί 48 και όχι 50:**
+48 = 4 × 12 = διαιρείται τέλεια σε grids 2, 3, και 4 στηλών — κανένα "μισοάδειο" τελευταίο row.
+
+**Αποτέλεσμα:** Από ~500ms render lag → instant. Ο χρήστης βλέπει τα πρώτα 48 αμέσως και φορτώνει περισσότερα on-demand.
+
+---
+
 ## Τρέχουσα Δομή Project
 
 ```
@@ -387,34 +588,40 @@ youtube-subscriptions/
 ├── app/
 │   ├── api/
 │   │   ├── auth/[...nextauth]/route.ts   ← OAuth endpoint
-│   │   ├── subscriptions/route.ts        ← Serve from cache
+│   │   ├── subscriptions/route.ts        ← Serve from cache + stale check
 │   │   ├── sync/route.ts                 ← Full YouTube sync
 │   │   ├── categories/route.ts           ← Read/write categories
-│   │   └── watched/route.ts              ← Toggle watched state
+│   │   ├── watched/route.ts              ← Toggle watched state
+│   │   ├── watchlater/route.ts           ← Toggle watch later
+│   │   └── lastvisit/route.ts            ← Get/update last visit timestamp
 │   ├── dashboard/page.tsx                ← Protected dashboard page
 │   ├── page.tsx                          ← Login page
 │   ├── layout.tsx
 │   └── globals.css
 ├── components/
-│   ├── Dashboard.tsx                     ← Main orchestrator
-│   ├── VideoCard.tsx                     ← Video card + watched button
+│   ├── Dashboard.tsx                     ← Main orchestrator (search, sort, filter, pagination)
+│   ├── VideoCard.tsx                     ← Video card + watched + watch later + NEW badge
 │   ├── ChannelFilter.tsx                 ← Channel pills
-│   ├── CategoryTabs.tsx                  ← Category tab bar
-│   └── CategoryManager.tsx              ← Category assignment modal
+│   ├── CategoryTabs.tsx                  ← Category tab bar με counts
+│   └── CategoryManager.tsx              ← Category modal (search + unassigned filter)
 ├── lib/
-│   ├── youtube.ts                        ← YouTube API wrapper (full pagination)
+│   ├── youtube.ts                        ← YouTube API wrapper (full pagination, batch processing)
 │   ├── cache.ts                          ← Cache read/write (server-only)
 │   ├── watched.ts                        ← Watched read/write (server-only)
+│   ├── watchlater.ts                     ← Watch later read/write (server-only)
+│   ├── lastvisit.ts                      ← Last visit read/write (server-only)
 │   ├── categories.ts                     ← Categories read/write (server-only)
 │   └── category-config.ts               ← Constants + types (client-safe)
 ├── data/
-│   ├── cache.json                        ← Cached videos + channels
+│   ├── cache.json                        ← Cached videos + channels (μεγάλο αρχείο!)
 │   ├── watched.json                      ← Watched video IDs
+│   ├── watchlater.json                   ← Watch later video IDs
+│   ├── lastvisit.json                    ← Timestamp τελευταίας επίσκεψης
 │   └── categories.json                   ← Channel → category mapping
 ├── types/
 │   └── next-auth.d.ts                    ← Session type extension
 ├── auth.ts                               ← NextAuth config
-├── next.config.ts                        ← Image domains
+├── next.config.ts                        ← Image domains (YouTube + Google)
 ├── .env.local                            ← Secrets (gitignored)
 ├── .env.local.example                    ← Template
 └── DEVLOG.md                             ← Αυτό το αρχείο
@@ -424,8 +631,6 @@ youtube-subscriptions/
 
 ## Roadmap (μελλοντικά βήματα)
 
-- [ ] Scheduled auto-sync (π.χ. κάθε πρωί με cron)
-- [ ] Search bar μέσα στο dashboard
-- [ ] Ταξινόμηση: νεότερα / παλιότερα / περισσότερα views
-- [ ] Deploy σε Vercel με Vercel KV για persistence
+- [ ] Deploy σε Vercel με Vercel KV για persistence (το `data/` folder δεν λειτουργεί σε serverless)
 - [ ] Mobile PWA (εγκατάσταση στο κινητό σαν app)
+- [ ] Infinite scroll αντί για "Φόρτωσε περισσότερα" (Intersection Observer API)
