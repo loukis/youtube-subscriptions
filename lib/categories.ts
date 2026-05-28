@@ -1,8 +1,10 @@
 import fs from "fs";
 import path from "path";
+import { CATEGORIES } from "./category-config";
+import type { Category } from "./category-config";
 
-export const CATEGORIES = ["Code", "Economy", "Music", "Sports", "News", "Gaming", "Other"] as const;
-export type Category = (typeof CATEGORIES)[number];
+export { CATEGORIES };
+export type { Category };
 
 const filePath = path.join(process.cwd(), "data", "categories.json");
 

@@ -1,22 +1,11 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { getAllSubscriptionVideos } from "@/lib/youtube";
+import { readCache } from "@/lib/cache";
 
 export async function GET() {
   const session = await auth();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  if (!session?.accessToken) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-  }
-
-  try {
-    const data = await getAllSubscriptionVideos(session.accessToken, 3);
-    return NextResponse.json(data);
-  } catch (error) {
-    console.error("YouTube API error:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch YouTube data" },
-      { status: 500 }
-    );
-  }
+  const cache = readCache();
+  return NextResponse.json(cache);
 }

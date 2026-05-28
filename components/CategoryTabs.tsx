@@ -1,6 +1,6 @@
 "use client";
 
-import { CATEGORIES, Category } from "@/lib/categories";
+import { CATEGORIES, Category } from "@/lib/category-config";
 
 interface Props {
   selected: Category | null;

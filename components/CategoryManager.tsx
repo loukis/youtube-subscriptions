@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import { Channel } from "@/lib/youtube";
-import { CATEGORIES, Category } from "@/lib/categories";
+import { CATEGORIES, Category } from "@/lib/category-config";
 
 interface Props {
   channels: Channel[];

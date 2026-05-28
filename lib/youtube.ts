@@ -28,7 +28,7 @@ function getOAuthClient(accessToken: string) {
   return auth;
 }
 
-// Βήμα 1: Φέρνει όλα τα subscriptions του λογαριασμού (με pagination)
+// Βήμα 1: Φέρνει όλα τα subscriptions (με pagination)
 export async function getSubscriptions(accessToken: string): Promise<Channel[]> {
   const auth = getOAuthClient(accessToken);
   const channels: Channel[] = [];
@@ -43,15 +43,14 @@ export async function getSubscriptions(accessToken: string): Promise<Channel[]> 
       pageToken,
     });
 
-    const items = res.data.items ?? [];
-    for (const item of items) {
+    for (const item of res.data.items ?? []) {
       const channelId = item.snippet?.resourceId?.channelId;
       if (!channelId) continue;
       channels.push({
         id: channelId,
         title: item.snippet?.title ?? "Unknown",
         thumbnail: item.snippet?.thumbnails?.default?.url ?? "",
-        uploadsPlaylistId: "", // συμπληρώνεται στο επόμενο βήμα
+        uploadsPlaylistId: "",
       });
     }
 
@@ -61,7 +60,7 @@ export async function getSubscriptions(accessToken: string): Promise<Channel[]> 
   return channels;
 }
 
-// Βήμα 2: Για κάθε κανάλι παίρνει το uploads playlist ID (batched ανά 50)
+// Βήμα 2: Παίρνει uploads playlist ID για κάθε κανάλι (batched 50)
 export async function enrichChannelsWithPlaylistIds(
   accessToken: string,
   channels: Channel[]
@@ -71,12 +70,11 @@ export async function enrichChannelsWithPlaylistIds(
 
   for (let i = 0; i < channels.length; i += 50) {
     const batch = channels.slice(i, i + 50);
-    const ids = batch.map((c) => c.id);
 
     const res = await youtube.channels.list({
       auth,
       part: ["contentDetails", "snippet"],
-      id: ids,
+      id: batch.map((c) => c.id),
       maxResults: 50,
     });
 
@@ -85,10 +83,8 @@ export async function enrichChannelsWithPlaylistIds(
       if (!original) continue;
       enriched.push({
         ...original,
-        thumbnail:
-          item.snippet?.thumbnails?.default?.url ?? original.thumbnail,
-        uploadsPlaylistId:
-          item.contentDetails?.relatedPlaylists?.uploads ?? "",
+        thumbnail: item.snippet?.thumbnails?.default?.url ?? original.thumbnail,
+        uploadsPlaylistId: item.contentDetails?.relatedPlaylists?.uploads ?? "",
       });
     }
   }
@@ -96,27 +92,36 @@ export async function enrichChannelsWithPlaylistIds(
   return enriched;
 }
 
-// Βήμα 3: Φέρνει τα N πιο πρόσφατα video IDs από το uploads playlist κάθε καναλιού
-export async function getRecentVideoIds(
+// Βήμα 3: Φέρνει ΟΛΑ τα video IDs από ένα uploads playlist (πλήρης pagination)
+export async function getAllVideoIds(
   accessToken: string,
-  uploadsPlaylistId: string,
-  maxResults = 5
+  uploadsPlaylistId: string
 ): Promise<string[]> {
   const auth = getOAuthClient(accessToken);
+  const videoIds: string[] = [];
+  let pageToken: string | undefined;
 
-  const res = await youtube.playlistItems.list({
-    auth,
-    part: ["contentDetails"],
-    playlistId: uploadsPlaylistId,
-    maxResults,
-  });
+  do {
+    const res = await youtube.playlistItems.list({
+      auth,
+      part: ["contentDetails"],
+      playlistId: uploadsPlaylistId,
+      maxResults: 50,
+      pageToken,
+    });
 
-  return (res.data.items ?? [])
-    .map((item) => item.contentDetails?.videoId ?? "")
-    .filter(Boolean);
+    const ids = (res.data.items ?? [])
+      .map((item) => item.contentDetails?.videoId ?? "")
+      .filter(Boolean);
+
+    videoIds.push(...ids);
+    pageToken = res.data.nextPageToken ?? undefined;
+  } while (pageToken);
+
+  return videoIds;
 }
 
-// Βήμα 4: Φέρνει λεπτομέρειες videos (batched ανά 50)
+// Βήμα 4: Φέρνει λεπτομέρειες videos (batched 50)
 export async function getVideoDetails(
   accessToken: string,
   videoIds: string[]
@@ -153,35 +158,27 @@ export async function getVideoDetails(
   return videos;
 }
 
-// Κεντρική συνάρτηση: φέρνει όλα τα πρόσφατα videos από όλα τα subscriptions
+// Κεντρική συνάρτηση: φέρνει ΟΛΑ τα videos από ΟΛΕΣ τις subscriptions
 export async function getAllSubscriptionVideos(
-  accessToken: string,
-  videosPerChannel = 3
+  accessToken: string
 ): Promise<{ channels: Channel[]; videos: Video[] }> {
   const rawChannels = await getSubscriptions(accessToken);
   const channels = await enrichChannelsWithPlaylistIds(accessToken, rawChannels);
 
   const allVideoIds: string[] = [];
 
-  // Για κάθε κανάλι φέρνουμε τα πρόσφατα video IDs
   await Promise.all(
     channels.map(async (channel) => {
       if (!channel.uploadsPlaylistId) return;
-      const ids = await getRecentVideoIds(
-        accessToken,
-        channel.uploadsPlaylistId,
-        videosPerChannel
-      );
+      const ids = await getAllVideoIds(accessToken, channel.uploadsPlaylistId);
       allVideoIds.push(...ids);
     })
   );
 
   const videos = await getVideoDetails(accessToken, allVideoIds);
 
-  // Ταξινόμηση: νεότερα πρώτα
   videos.sort(
-    (a, b) =>
-      new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
+    (a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
   );
 
   return { channels, videos };
